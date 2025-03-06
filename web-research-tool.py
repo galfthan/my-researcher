@@ -473,6 +473,7 @@ class WebResearchTool:
         Use Claude to generate a summary of the research findings.
         For sources with longer content, this implementation processes them
         in a way that captures the full depth of the information.
+        Ensures ALL sources are included in the summary.
         
         Args:
             research_task: Dictionary containing research task details
@@ -506,9 +507,109 @@ class WebResearchTool:
                     "content": source.content
                 })
         
-        # Second pass: Generate comprehensive research summary
+        # If we have a large number of sources, we may need to process them in batches
+        # to avoid exceeding Claude's context window
+        MAX_SOURCES_PER_BATCH = 7
+        if len(source_summaries) > MAX_SOURCES_PER_BATCH:
+            print(f"Processing {len(source_summaries)} sources in batches for summary generation")
+            return self._batch_process_summaries(research_task, source_summaries, MAX_SOURCES_PER_BATCH)
+        else:
+            # Second pass: Generate comprehensive research summary for a manageable number of sources
+            return self._generate_research_summary(research_task, source_summaries)
+    
+    def _batch_process_summaries(self, research_task: Dict, source_summaries: List[Dict], 
+                                batch_size: int) -> str:
+        """
+        Process a large number of sources in batches to generate summaries,
+        then combine them into a final research summary.
+        
+        Args:
+            research_task: Dictionary containing research task details
+            source_summaries: List of source summary dictionaries
+            batch_size: Maximum number of sources to process in a single batch
+            
+        Returns:
+            Combined research summary
+        """
+        # Sort sources by relevance
+        sorted_summaries = sorted(source_summaries, key=lambda s: s.get('relevance', 0), reverse=True)
+        
+        # Process in batches
+        batch_summaries = []
+        for i in range(0, len(sorted_summaries), batch_size):
+            batch = sorted_summaries[i:i+batch_size]
+            print(f"Processing batch {i//batch_size + 1} with sources {i+1}-{min(i+batch_size, len(sorted_summaries))}")
+            
+            # Generate summary for this batch
+            batch_summary = self._generate_research_summary(
+                research_task, 
+                batch,
+                is_batch=True,
+                batch_info=f"Batch {i//batch_size + 1}/{(len(sorted_summaries) + batch_size - 1)//batch_size}"
+            )
+            
+            batch_summaries.append(batch_summary)
+        
+        # Combine batch summaries into a final summary
+        combined_summary = "\n\n".join(batch_summaries)
+        
+        # Generate a final integrated summary
+        final_prompt = f"""
+        You are a research assistant creating a unified research summary from multiple batch summaries.
+        
+        RESEARCH TASK:
+        {json.dumps(research_task, indent=2)}
+        
+        BATCH SUMMARIES:
+        {combined_summary}
+        
+        Please integrate these batch summaries into a single coherent research summary. 
+        
+        Your final summary MUST include:
+        1. An executive summary (2-3 paragraphs)
+        2. A "Key Findings" section with the most important information
+        3. A "Sources" section that lists ALL sources from ALL batches with:
+           - Full URL of each source
+           - Relevance score
+           - Comprehensive description (1-2 paragraphs minimum per source)
+        4. "Suggested Next Steps" for further research
+        
+        Make sure NO sources are omitted - you must include EVERY source from ALL batches.
+        
+        FORMAT your response to be well-organized with clear sections and subsections.
+        """
+        
+        print("Generating final integrated summary from all batches...")
+        response = self.anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=8000,  # Increased for comprehensive summary
+            temperature=0.2,
+            system="You are a helpful research assistant creating a comprehensive integrated research summary.",
+            messages=[
+                {"role": "user", "content": final_prompt}
+            ]
+        )
+        
+        return response.content[0].text
+    
+    def _generate_research_summary(self, research_task: Dict, source_summaries: List[Dict],
+                                 is_batch: bool = False, batch_info: str = "") -> str:
+        """
+        Generate a research summary for a set of sources.
+        
+        Args:
+            research_task: Dictionary containing research task details
+            source_summaries: List of source summary dictionaries
+            is_batch: Whether this is processing a batch of a larger set
+            batch_info: Information about the batch position
+            
+        Returns:
+            Research summary
+        """
+        batch_context = f"\nThis is {batch_info} of sources being processed." if is_batch else ""
+        
         prompt = f"""
-        You are a research assistant summarizing findings from web research.
+        You are a research assistant summarizing findings from web research.{batch_context}
         
         RESEARCH TASK:
         {json.dumps(research_task, indent=2)}
@@ -520,21 +621,31 @@ class WebResearchTool:
         1. Provides an overview of the topic and key findings
         2. Highlights the most important information from each relevant source
         3. Notes any gaps or areas for further research
-        4. Lists the top sources in order of relevance with brief descriptions
+        4. Lists ALL sources in order of relevance with detailed descriptions
         
         FORMAT:
         - Start with an executive summary (2-3 paragraphs)
         - Include a "Key Findings" section with the most important information
-        - Include a "Sources" section listing each source with its relevance and brief description
+        - Include a detailed "Sources" section that:
+          * Lists EVERY source with its full URL (not abbreviated)
+          * Provides its relevance score
+          * Includes a substantial summary (at least 1-2 paragraphs per source)
+          * Highlights key facts and insights from each source
         - End with "Suggested Next Steps" for further research
+        
+        IMPORTANT:
+        - Be detailed and comprehensive in your summaries
+        - Include full URLs of each source for easy reference
+        - Make sure each source summary gives a thorough overview of what the source contains
+        - Do NOT omit any sources - ALL sources must be included in your summary
         
         YOUR RESPONSE SHOULD BE WELL-FORMATTED AND READY TO PRESENT TO THE USER.
         """
         
-        # Since the main summary might be complex, we use a more robust model
+        # Since the main summary might be complex, we use a more robust model with increased token allocation
         response = self.anthropic_client.messages.create(
             model="claude-3-haiku-20240307",
-            max_tokens=4000,
+            max_tokens=8000,  # Increased from 4000 to accommodate more sources
             temperature=0.2,
             system="You are a helpful research assistant summarizing web research findings.",
             messages=[
@@ -586,13 +697,14 @@ class WebResearchTool:
                 DOCUMENT CHUNK CONTENT:
                 {chunk}
                 
-                Provide a concise but detailed summary of the key information in this document chunk 
-                that is most relevant to the research task. Focus on extracting facts, data, and insights.
+                Provide a comprehensive and detailed summary of the key information in this document chunk 
+                that is relevant to the research task. Be thorough in capturing facts, data, statistics, 
+                methodology, findings, conclusions, and insights. Include specific details where possible.
                 """
                 
                 response = self.anthropic_client.messages.create(
                     model="claude-3-haiku-20240307",
-                    max_tokens=2000,
+                    max_tokens=3000,  # Increased from 2000
                     temperature=0.1,
                     system="You are a helpful research assistant extracting key information from documents.",
                     messages=[
@@ -620,14 +732,16 @@ class WebResearchTool:
             CHUNK SUMMARIES:
             {combined_summary}
             
-            Create a unified, coherent summary of this document that captures all the key information
-            from the different chunks that is relevant to the research task. Eliminate redundancies 
-            and organize the information logically.
+            Create a comprehensive and detailed unified summary of this document that captures all the key 
+            information from the different chunks that is relevant to the research task. Include specific 
+            facts, figures, methodology, and conclusions. Be thorough while still eliminating redundancies 
+            and organizing the information logically. Your summary should be substantial enough to give readers
+            a complete understanding of the document's relevant content.
             """
             
             response = self.anthropic_client.messages.create(
                 model="claude-3-haiku-20240307",
-                max_tokens=2500,
+                max_tokens=4000,  # Increased from 2500
                 temperature=0.1,
                 system="You are a helpful research assistant creating unified document summaries.",
                 messages=[
@@ -651,13 +765,16 @@ class WebResearchTool:
             DOCUMENT CONTENT:
             {source.content}
             
-            Provide a detailed summary of the key information in this document
-            that is most relevant to the research task. Focus on extracting facts, data, and insights.
+            Provide a comprehensive and detailed summary of the key information in this document
+            that is relevant to the research task. Be thorough in capturing facts, data, statistics, 
+            methodology, findings, conclusions, and insights. Include specific details where possible.
+            Your summary should be substantial enough to give readers a complete understanding of 
+            the document's relevant content.
             """
             
             response = self.anthropic_client.messages.create(
                 model="claude-3-haiku-20240307",
-                max_tokens=2500,
+                max_tokens=4000,  # Increased from 2500
                 temperature=0.1,
                 system="You are a helpful research assistant summarizing documents.",
                 messages=[
@@ -746,9 +863,17 @@ class WebResearchTool:
         output.append(summary)
         output.append("\n" + "="*80 + "\n")
         
-        # Add information about source files
-        output.append("\n## Source Files")
+        # Add information about source files with full URLs
+        output.append("\n## Source Files and URLs")
         output.append(f"Source content has been saved to: {output_dir}\n")
+        output.append("Full source URLs for easy reference:")
+        
+        # List all sources with their full URLs
+        for i, source in enumerate(sources):
+            output.append(f"{i+1}. [{source.title}]({source.url})")
+            output.append(f"   - Relevance score: {source.relevance_score:.2f}")
+            output.append(f"   - URL: {source.url}")
+            output.append("")
         
         # Add instructions for using with Claude
         output.append("\n## Using These Results with Claude")
