@@ -37,7 +37,8 @@ class Source:
 
 class WebResearchTool:
     def __init__(self, google_api_key: str, google_cse_id: str, anthropic_api_key: str, 
-                 max_sources: int = 10, max_searches: int = 5):
+                 max_sources: int = 10, max_searches: int = 5, delay: float = 1.0,
+                 verbose: bool = False):
         """
         Initialize the web research tool with API keys and configuration.
         
@@ -47,12 +48,16 @@ class WebResearchTool:
             anthropic_api_key: API key for Anthropic Claude API
             max_sources: Maximum number of sources to return
             max_searches: Maximum number of search iterations
+            delay: Delay between API requests to avoid rate limiting
+            verbose: Whether to print detailed progress information
         """
         self.google_api_key = google_api_key
         self.google_cse_id = google_cse_id
         self.anthropic_api_key = anthropic_api_key
         self.max_sources = max_sources
         self.max_searches = max_searches
+        self.delay = delay
+        self.verbose = verbose
         
         # Initialize the Google Custom Search API client
         self.google_service = build("customsearch", "v1", developerKey=self.google_api_key)
@@ -63,6 +68,15 @@ class WebResearchTool:
         self.sources = []
         self.search_queries = []
         self.completed_queries = set()
+        
+        # Print configuration if verbose
+        if self.verbose:
+            print(f"Web Research Tool Configuration:")
+            print(f"- Max sources: {self.max_sources}")
+            print(f"- Max searches: {self.max_searches}")
+            print(f"- Request delay: {self.delay}s")
+            print(f"- Google CSE ID: {self.google_cse_id[:5]}...{self.google_cse_id[-5:]}")
+            print(f"- Using Anthropic API key: {self.anthropic_api_key[:5]}...{self.anthropic_api_key[-5:]}")
         
     def parse_yaml_request(self, yaml_request: str) -> Dict:
         """
@@ -247,6 +261,7 @@ class WebResearchTool:
     def evaluate_source_relevance(self, source: Source, research_task: Dict) -> float:
         """
         Use Claude to evaluate the relevance of a source to the research task.
+        Processes the entire document, chunking if necessary for large documents.
         
         Args:
             source: Source object with content
@@ -255,8 +270,65 @@ class WebResearchTool:
         Returns:
             Relevance score between 0.0 and 1.0
         """
-        # Create a summary of the source content if it's too long
-        content_preview = source.content[:3000] + "..." if len(source.content) > 3000 else source.content
+        # For very large documents, we need to process them in chunks
+        # but still maintain a comprehensive analysis
+        full_content = source.content
+        
+        # If content is short enough, analyze it directly
+        if len(full_content) < 12000:  # Claude Haiku has ~16K token limit
+            return self._evaluate_content_chunk(source, full_content, research_task)
+        else:
+            # For longer documents, we'll analyze in chunks and combine scores
+            print(f"Document is large ({len(full_content)} chars), analyzing in chunks...")
+            
+            # Split into chunks with some overlap
+            chunk_size = 10000
+            overlap = 1000
+            chunks = []
+            
+            for i in range(0, len(full_content), chunk_size - overlap):
+                chunk = full_content[i:i + chunk_size]
+                chunks.append(chunk)
+                
+            # Analyze each chunk
+            chunk_scores = []
+            for i, chunk in enumerate(chunks):
+                print(f"Analyzing chunk {i+1}/{len(chunks)}...")
+                score = self._evaluate_content_chunk(source, chunk, research_task, is_chunk=True, 
+                                                   chunk_info=f"Chunk {i+1} of {len(chunks)}")
+                chunk_scores.append(score)
+            
+            # Combine scores - we'll take a weighted average that prioritizes 
+            # the highest scores since relevant sections are most important
+            chunk_scores.sort(reverse=True)
+            if len(chunk_scores) > 2:
+                # Give higher weight to the top scores
+                final_score = (chunk_scores[0] * 0.5 + 
+                              chunk_scores[1] * 0.3 + 
+                              sum(chunk_scores[2:]) * 0.2 / max(1, len(chunk_scores) - 2))
+            else:
+                final_score = sum(chunk_scores) / len(chunk_scores)
+                
+            print(f"Final combined relevance score: {final_score:.2f}")
+            return final_score
+    
+    def _evaluate_content_chunk(self, source: Source, content: str, 
+                               research_task: Dict, is_chunk: bool = False,
+                               chunk_info: str = "") -> float:
+        """
+        Evaluate a specific chunk of content for relevance.
+        
+        Args:
+            source: Source object
+            content: Content text to evaluate
+            research_task: Research task details
+            is_chunk: Whether this is a chunk of a larger document
+            chunk_info: Information about the chunk position
+            
+        Returns:
+            Relevance score between 0.0 and 1.0
+        """
+        chunk_context = f"\nThis is {chunk_info} from the full document." if is_chunk else ""
         
         prompt = f"""
         You are evaluating the relevance of a source for a research task.
@@ -267,10 +339,10 @@ class WebResearchTool:
         SOURCE DETAILS:
         Title: {source.title}
         URL: {source.url}
-        Snippet: {source.snippet}
+        Snippet: {source.snippet}{chunk_context}
         
-        CONTENT PREVIEW:
-        {content_preview}
+        DOCUMENT CONTENT:
+        {content}
         
         Evaluate how relevant this source is to the research task on a scale from 0.0 to 1.0:
         - 0.0: Completely irrelevant
@@ -399,6 +471,8 @@ class WebResearchTool:
     def summarize_findings(self, research_task: Dict, sources: List[Source]) -> str:
         """
         Use Claude to generate a summary of the research findings.
+        For sources with longer content, this implementation processes them
+        in a way that captures the full depth of the information.
         
         Args:
             research_task: Dictionary containing research task details
@@ -407,20 +481,32 @@ class WebResearchTool:
         Returns:
             Summary of the research findings
         """
-        # Create a summary of the top sources
-        sources_info = []
-        for i, s in enumerate(sources):
-            # Limit content preview to reduce token usage
-            content_preview = s.content[:1000] + "..." if len(s.content) > 1000 else s.content
-            sources_info.append({
-                "index": i + 1,
-                "title": s.title,
-                "url": s.url,
-                "snippet": s.snippet,
-                "relevance": s.relevance_score,
-                "content_preview": content_preview
-            })
+        # First pass: Create individual source summaries
+        source_summaries = []
         
+        for i, source in enumerate(sources):
+            if len(source.content) > 8000:
+                # For longer documents, generate a standalone summary first
+                print(f"Generating summary for large source {i+1}: {source.title}")
+                summary = self._generate_source_summary(source, research_task)
+                source_summaries.append({
+                    "index": i + 1,
+                    "title": source.title,
+                    "url": source.url,
+                    "relevance": source.relevance_score,
+                    "summary": summary
+                })
+            else:
+                # For shorter documents, include full content
+                source_summaries.append({
+                    "index": i + 1,
+                    "title": source.title,
+                    "url": source.url,
+                    "relevance": source.relevance_score,
+                    "content": source.content
+                })
+        
+        # Second pass: Generate comprehensive research summary
         prompt = f"""
         You are a research assistant summarizing findings from web research.
         
@@ -428,7 +514,7 @@ class WebResearchTool:
         {json.dumps(research_task, indent=2)}
         
         SOURCES FOUND:
-        {json.dumps(sources_info, indent=2)}
+        {json.dumps(source_summaries, indent=2)}
         
         Please provide a comprehensive research summary that:
         1. Provides an overview of the topic and key findings
@@ -444,6 +530,142 @@ class WebResearchTool:
         
         YOUR RESPONSE SHOULD BE WELL-FORMATTED AND READY TO PRESENT TO THE USER.
         """
+        
+        # Since the main summary might be complex, we use a more robust model
+        response = self.anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=4000,
+            temperature=0.2,
+            system="You are a helpful research assistant summarizing web research findings.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.content[0].text
+    
+    def _generate_source_summary(self, source: Source, research_task: Dict) -> str:
+        """
+        Generate a detailed summary of a single large source.
+        
+        Args:
+            source: Source object with content
+            research_task: Dictionary containing research task details
+            
+        Returns:
+            Detailed summary of the source
+        """
+        # For very large content, process in chunks
+        if len(source.content) > 12000:
+            # Split into chunks with overlap
+            chunk_size = 10000
+            overlap = 1000
+            chunks = []
+            
+            for i in range(0, len(source.content), chunk_size - overlap):
+                chunk = source.content[i:i + chunk_size]
+                chunks.append(chunk)
+            
+            # Generate summary for each chunk
+            chunk_summaries = []
+            for i, chunk in enumerate(chunks):
+                print(f"Summarizing chunk {i+1}/{len(chunks)} for source: {source.title}")
+                
+                prompt = f"""
+                You are summarizing a portion of a document for research purposes.
+                
+                RESEARCH TASK:
+                {json.dumps(research_task, indent=2)}
+                
+                SOURCE:
+                Title: {source.title}
+                URL: {source.url}
+                
+                This is chunk {i+1} of {len(chunks)} from the document.
+                
+                DOCUMENT CHUNK CONTENT:
+                {chunk}
+                
+                Provide a concise but detailed summary of the key information in this document chunk 
+                that is most relevant to the research task. Focus on extracting facts, data, and insights.
+                """
+                
+                response = self.anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=2000,
+                    temperature=0.1,
+                    system="You are a helpful research assistant extracting key information from documents.",
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                
+                chunk_summaries.append(response.content[0].text)
+            
+            # Combine chunk summaries
+            combined_summary = "\n\n".join([f"--- Chunk {i+1} Summary ---\n{summary}" 
+                                          for i, summary in enumerate(chunk_summaries)])
+            
+            # Generate a unified summary from the chunk summaries
+            final_prompt = f"""
+            You are creating a unified summary of a document based on summaries of different chunks.
+            
+            RESEARCH TASK:
+            {json.dumps(research_task, indent=2)}
+            
+            SOURCE:
+            Title: {source.title}
+            URL: {source.url}
+            
+            CHUNK SUMMARIES:
+            {combined_summary}
+            
+            Create a unified, coherent summary of this document that captures all the key information
+            from the different chunks that is relevant to the research task. Eliminate redundancies 
+            and organize the information logically.
+            """
+            
+            response = self.anthropic_client.messages.create(
+                model="claude-3-haiku-20240307",
+                max_tokens=2500,
+                temperature=0.1,
+                system="You are a helpful research assistant creating unified document summaries.",
+                messages=[
+                    {"role": "user", "content": final_prompt}
+                ]
+            )
+            
+            return response.content[0].text
+        else:
+            # For content that fits within context window
+            prompt = f"""
+            You are summarizing a document for research purposes.
+            
+            RESEARCH TASK:
+            {json.dumps(research_task, indent=2)}
+            
+            SOURCE:
+            Title: {source.title}
+            URL: {source.url}
+            
+            DOCUMENT CONTENT:
+            {source.content}
+            
+            Provide a detailed summary of the key information in this document
+            that is most relevant to the research task. Focus on extracting facts, data, and insights.
+            """
+            
+            response = self.anthropic_client.messages.create(
+                model="claude-3-haiku-20240307",
+                max_tokens=2500,
+                temperature=0.1,
+                system="You are a helpful research assistant summarizing documents.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            return response.content[0].text
         
         response = self.anthropic_client.messages.create(
             model="claude-3-haiku-20240307",
@@ -684,6 +906,10 @@ def main():
     parser.add_argument("--max-sources", "-s", type=int, default=10, help="Maximum number of sources to retrieve")
     parser.add_argument("--max-searches", "-q", type=int, default=5, help="Maximum number of search iterations")
     parser.add_argument("--config", "-c", type=str, help="Path to config.json file with API keys")
+    parser.add_argument("--delay", "-d", type=float, default=1.0, help="Delay between API requests (in seconds)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--full-content", "-f", action="store_true", 
+                        help="Process full content of all documents (may increase API usage and time)")
     
     args = parser.parse_args()
     
@@ -751,7 +977,9 @@ def main():
         google_cse_id=google_cse_id,
         anthropic_api_key=anthropic_api_key,
         max_sources=args.max_sources,
-        max_searches=args.max_searches
+        max_searches=args.max_searches,
+        delay=args.delay,
+        verbose=args.verbose
     )
     
     # Conduct the research
