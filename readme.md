@@ -11,6 +11,25 @@ A Python tool that acts as a "human in the loop" agent for AI Chats to gather re
 - Comprehensive research summary generation
 - Export of findings in a format ready for Claude Web
 
+## Project Structure
+
+```
+web_research_tool/
+├── __init__.py          # Package initialization
+├── main.py              # Command-line interface
+├── web_research_tool.py # Main orchestration class
+├── config.py            # Configuration handling
+├── models.py            # Data models (SearchQuery, Source)
+├── search.py            # Google search functionality
+├── content_extraction.py # Content extraction from URLs
+├── source_evaluation.py # Source relevance evaluation
+├── query_generation.py  # Initial and follow-up query generation
+├── summarization.py     # Result summarization functionality
+└── output.py            # Output formatting and file handling
+```
+
+
+
 ## Installation
 
 ### Prerequisites
