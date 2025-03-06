@@ -1,6 +1,6 @@
-# Claude Web Research Tool
+# Ai Web Research Tool
 
-A Python tool that acts as a "human in the loop" agent for Claude Web Chat to gather relevant information from the internet for research purposes. This tool uses Google Search and Claude Haiku to intelligently search for, evaluate, and collect relevant sources based on your research questions.
+A Python tool that acts as a "human in the loop" agent for AI Chats to gather relevant information from the internet for research purposes. This tool uses Google Search and Claude Haiku to intelligently search for, evaluate, and collect relevant sources based on your research questions.
 
 ## Features
 
