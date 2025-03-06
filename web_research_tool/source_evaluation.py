@@ -60,6 +60,9 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
                 chunk_info=f"Chunk {i+1} of {len(chunks)}"
             )
             chunk_scores.append(score)
+            
+            # Add a small delay to avoid rate limiting
+            time.sleep(0.5)
         
         # Combine scores - we'll take a weighted average that prioritizes 
         # the highest scores since relevant sections are most important

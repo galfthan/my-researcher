@@ -10,9 +10,7 @@ def summarize_findings(anthropic_client: Any, research_task: Dict, sources: List
                        verbose: bool = False) -> str:
     """
     Use Claude to generate a summary of the research findings.
-    For sources with longer content, this implementation processes them
-    in a way that captures the full depth of the information.
-    Ensures ALL sources are included in the summary.
+    Ensures all sources and their individual summaries are included in the final report.
     
     Args:
         anthropic_client: Anthropic API client
@@ -27,46 +25,30 @@ def summarize_findings(anthropic_client: Any, research_task: Dict, sources: List
     source_summaries = []
     
     for i, source in enumerate(sources):
-        if len(source.content) > 8000:
-            # For longer documents, generate a standalone summary first
+        if verbose:
+            print(f"Processing source {i+1}/{len(sources)}: {source.title}")
+            
+        # For all documents, generate a summary
+        if len(source.content) > 20000:
             if verbose:
                 print(f"Generating summary for large source {i+1}: {source.title}")
             
             summary = _generate_source_summary(anthropic_client, source, research_task)
-            source_summaries.append({
-                "index": i + 1,
-                "title": source.title,
-                "url": source.url,
-                "relevance": source.relevance_score,
-                "summary": summary
-            })
         else:
-            # For shorter documents, include full content
-            source_summaries.append({
-                "index": i + 1,
-                "title": source.title,
-                "url": source.url,
-                "relevance": source.relevance_score,
-                "content": source.content
-            })
+            # For shorter documents, still generate a summary
+            summary = _generate_source_summary(anthropic_client, source, research_task)
+            
+        source_summaries.append({
+            "index": i + 1,
+            "title": source.title,
+            "url": source.url,
+            "relevance": source.relevance_score,
+            "summary": summary
+        })
     
-    # If we have a large number of sources, we may need to process them in batches
-    # to avoid exceeding Claude's context window
-    MAX_SOURCES_PER_BATCH = 7
-    if len(source_summaries) > MAX_SOURCES_PER_BATCH:
-        if verbose:
-            print(f"Processing {len(source_summaries)} sources in batches for summary generation")
-        
-        return _batch_process_summaries(
-            anthropic_client, 
-            research_task, 
-            source_summaries, 
-            MAX_SOURCES_PER_BATCH,
-            verbose
-        )
-    else:
-        # Second pass: Generate comprehensive research summary for a manageable number of sources
-        return _generate_research_summary(anthropic_client, research_task, source_summaries)
+    # Generate the main research summary (executive summary, key findings, etc.)
+    return _generate_research_summary(anthropic_client, research_task, source_summaries)
+
 
 def _batch_process_summaries(anthropic_client: Any, research_task: Dict, 
                             source_summaries: List[Dict], batch_size: int,
@@ -150,11 +132,13 @@ def _batch_process_summaries(anthropic_client: Any, research_task: Dict,
     
     return response.content[0].text
 
+
 def _generate_research_summary(anthropic_client: Any, research_task: Dict, 
                              source_summaries: List[Dict], is_batch: bool = False, 
                              batch_info: str = "") -> str:
     """
-    Generate a research summary for a set of sources.
+    Generate a research summary that includes executive summary, key findings,
+    and references to the numbered source list.
     
     Args:
         anthropic_client: Anthropic API client
@@ -168,6 +152,16 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
     """
     batch_context = f"\nThis is {batch_info} of sources being processed." if is_batch else ""
     
+    # Include only essential source info for the main summary generation
+    source_ref_list = []
+    for src in source_summaries:
+        source_ref_list.append({
+            "index": src["index"],
+            "title": src["title"],
+            "url": src["url"],
+            "relevance": src["relevance"]
+        })
+    
     prompt = f"""
     You are a research assistant summarizing findings from web research.{batch_context}
     
@@ -175,37 +169,31 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
     {json.dumps(research_task, indent=2)}
     
     SOURCES FOUND:
-    {json.dumps(source_summaries, indent=2)}
+    {json.dumps(source_ref_list, indent=2)}
     
     Please provide a comprehensive research summary that:
     1. Provides an overview of the topic and key findings
-    2. Highlights the most important information from each relevant source
+    2. Highlights the most important information from the sources
     3. Notes any gaps or areas for further research
-    4. Lists ALL sources in order of relevance with detailed descriptions
     
     FORMAT:
-    - Start with an executive summary (2-3 paragraphs)
+    - Start with an "Executive Summary" (2-3 paragraphs)
     - Include a "Key Findings" section with the most important information
-    - Include a detailed "Sources" section that:
-      * Lists EVERY source with its full URL (not abbreviated)
-      * Provides its relevance score
-      * Includes a substantial summary (at least 1-2 paragraphs per source)
-      * Highlights key facts and insights from each source
+    - Whenever you reference information from a specific source, include the source number in brackets, e.g., [1], [3]
+    - Include a brief "Sources" section that lists ONLY the numbered references and their URLs (detailed summaries will be added separately)
     - End with "Suggested Next Steps" for further research
     
     IMPORTANT:
-    - Be detailed and comprehensive in your summaries
-    - Include full URLs of each source for easy reference
-    - Make sure each source summary gives a thorough overview of what the source contains
-    - Do NOT omit any sources - ALL sources must be included in your summary
+    - Refer to sources by their number throughout your summary (e.g., "According to Source [3]...")
+    - Your executive summary and key findings should reference the source numbers to support claims
+    - Do NOT include the detailed source summaries - these will be appended separately
     
     YOUR RESPONSE SHOULD BE WELL-FORMATTED AND READY TO PRESENT TO THE USER.
     """
     
-    # Since the main summary might be complex, we use a more robust model with increased token allocation
     response = anthropic_client.messages.create(
         model="claude-3-5-haiku-20241022",
-        max_tokens=8000,  # Increased from 4000 to accommodate more sources
+        max_tokens=4000,
         temperature=0.2,
         system="You are a helpful research assistant summarizing web research findings.",
         messages=[
@@ -213,7 +201,22 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
         ]
     )
     
-    return response.content[0].text
+    # Get the main summary
+    main_summary = response.content[0].text
+    
+    # Now append the detailed source summaries
+    source_detail_section = "\n\n## Detailed Source Summaries\n\n"
+    for src in source_summaries:
+        source_detail_section += f"### Source [{src['index']}]: {src['title']}\n"
+        source_detail_section += f"**URL:** {src['url']}\n"
+        source_detail_section += f"**Relevance Score:** {src['relevance']:.2f}\n\n"
+        source_detail_section += f"{src['summary']}\n\n"
+        source_detail_section += "---\n\n"
+    
+    # Combine the main summary with the source details
+    complete_summary = main_summary + "\n\n" + source_detail_section
+    
+    return complete_summary
 
 def _generate_source_summary(anthropic_client: Any, source: Source, research_task: Dict) -> str:
     """
@@ -231,9 +234,9 @@ def _generate_source_summary(anthropic_client: Any, source: Source, research_tas
         Exception: If there's an error generating the summary, provides a fallback
     """
     # For very large content, process in chunks
-    if len(source.content) > 12000:
+    if len(source.content) > 20000:
         # Split into chunks with overlap
-        chunk_size = 10000
+        chunk_size = 18000
         overlap = 1000
         chunks = []
         
