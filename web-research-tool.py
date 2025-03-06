@@ -128,7 +128,7 @@ class WebResearchTool:
         """
         
         response = self.anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-3-5-haiku-20241022",
             max_tokens=1000,
             temperature=0.2,
             system="You are a helpful research assistant that generates effective search queries.",
@@ -356,7 +356,7 @@ class WebResearchTool:
         
         try:
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=100,
                 temperature=0.0,
                 system="You evaluate source relevance with a single number between 0.0 and 1.0.",
@@ -441,7 +441,7 @@ class WebResearchTool:
         """
         
         response = self.anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-3-5-haiku-20241022",
             max_tokens=1000,
             temperature=0.3,
             system="You are a helpful research assistant that generates effective follow-up search queries.",
@@ -581,7 +581,7 @@ class WebResearchTool:
         
         print("Generating final integrated summary from all batches...")
         response = self.anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-3-5-haiku-20241022",
             max_tokens=8000,  # Increased for comprehensive summary
             temperature=0.2,
             system="You are a helpful research assistant creating a comprehensive integrated research summary.",
@@ -644,7 +644,7 @@ class WebResearchTool:
         
         # Since the main summary might be complex, we use a more robust model with increased token allocation
         response = self.anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-3-5-haiku-20241022",
             max_tokens=8000,  # Increased from 4000 to accommodate more sources
             temperature=0.2,
             system="You are a helpful research assistant summarizing web research findings.",
@@ -703,7 +703,7 @@ class WebResearchTool:
                 """
                 
                 response = self.anthropic_client.messages.create(
-                    model="claude-3-haiku-20240307",
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=3000,  # Increased from 2000
                     temperature=0.1,
                     system="You are a helpful research assistant extracting key information from documents.",
@@ -740,7 +740,7 @@ class WebResearchTool:
             """
             
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=4000,  # Increased from 2500
                 temperature=0.1,
                 system="You are a helpful research assistant creating unified document summaries.",
@@ -773,7 +773,7 @@ class WebResearchTool:
             """
             
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=4000,  # Increased from 2500
                 temperature=0.1,
                 system="You are a helpful research assistant summarizing documents.",
@@ -785,7 +785,7 @@ class WebResearchTool:
             return response.content[0].text
         
         response = self.anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-3-5-haiku-20241022",
             max_tokens=4000,
             temperature=0.2,
             system="You are a helpful research assistant summarizing web research findings.",
