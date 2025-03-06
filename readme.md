@@ -1,4 +1,4 @@
-# Ai Web Research Tool
+# My-researcher Web Research Tool
 
 A Python tool that acts as a "human in the loop" agent for AI Chats to gather relevant information from the internet for research purposes. This tool uses Google Search and Claude Haiku to intelligently search for, evaluate, and collect relevant sources based on your research questions.
 
@@ -42,8 +42,8 @@ web_research_tool/
 
 1. Clone this repository:
    ```
-   git clone <repository-url>
-   cd claude-web-research-tool
+   git clone https://github.com/galfthan/my-researcher
+   cd my-researcher
    ```
 
 2. Install required dependencies:
@@ -79,13 +79,13 @@ web_research_tool/
 Run the tool with a YAML file containing your research request:
 
 ```
-python web_research_tool.py --input research_request.yaml --output research_results
+ python -m web_research_tool.main --input research_request.yaml --output research_results
 ```
 
 Or provide the YAML through standard input:
 
 ```
-python web_research_tool.py
+python -m web_research_tool.main
 ```
 
 Then paste your YAML and press Ctrl+D (or Ctrl+Z on Windows) to finish input.
@@ -110,15 +110,14 @@ context: "Additional context about the research question"
 expected_output: "What specifically you want to know or learn"
 ```
 
-See the `example_request.yaml` file for a complete example.
 
 ### Workflow
 
-1. Start a conversation with Claude Web and discuss your research topic
-2. Ask Claude to help you craft a YAML research request based on your discussion
+1. Start a conversation with an AI chat service and discuss your research topic
+2. Ask it to help you craft a YAML research request based on your discussion
 3. Run the research tool with the YAML request
-4. Upload the research summary and source files to your Claude Web conversation
-5. Continue your discussion with Claude, now informed by the research results
+4. Upload the research summary and source files to the conversation
+5. Continue your discussion, now informed by the research results
 
 ## Output
 
@@ -131,7 +130,6 @@ The tool generates:
 ## Limitations
 
 - The tool is limited by Google's Search API quota (100 queries per day for free tier)
-- Claude Haiku has a context window limitation, so very long documents may be truncated
 - PDF extraction may not work perfectly for all PDFs, especially scanned documents
 
 ## Troubleshooting
