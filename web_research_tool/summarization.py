@@ -22,36 +22,27 @@ def summarize_findings(anthropic_client: Any, research_task: Dict, sources: List
         Summary of the research findings
     """
     # First pass: Create individual source summaries
-    source_summaries = []
-    
     for i, source in enumerate(sources):
         if verbose:
             print(f"Processing source {i+1}/{len(sources)}: {source.title}")
             
-        # For all documents, generate a summary
-        if len(source.content) > 20000:
-            if verbose:
-                print(f"Generating summary for large source {i+1}: {source.title}")
-            
-            summary = _generate_source_summary(anthropic_client, source, research_task)
-        else:
-            # For shorter documents, still generate a summary
-            summary = _generate_source_summary(anthropic_client, source, research_task)
-            
-        source_summaries.append({
-            "index": i + 1,
-            "title": source.title,
-            "url": source.url,
-            "relevance": source.relevance_score,
-            "summary": summary
-        })
+        # For all documents, generate a detailed summary if not already present
+        if not source.detailed_summary:
+            if len(source.content) > 20000:
+                if verbose:
+                    print(f"Generating detailed summary for large source {i+1}: {source.title}")
+                
+                source.detailed_summary = _generate_source_summary(anthropic_client, source, research_task)
+            else:
+                # For shorter documents, still generate a detailed summary
+                source.detailed_summary = _generate_source_summary(anthropic_client, source, research_task)
     
     # Generate the main research summary (executive summary, key findings, etc.)
-    return _generate_research_summary(anthropic_client, research_task, source_summaries)
+    return _generate_research_summary(anthropic_client, research_task, sources)
 
 
 def _batch_process_summaries(anthropic_client: Any, research_task: Dict, 
-                            source_summaries: List[Dict], batch_size: int,
+                            sources: List[Source], batch_size: int,
                             verbose: bool = False) -> str:
     """
     Process a large number of sources in batches to generate summaries,
@@ -60,7 +51,7 @@ def _batch_process_summaries(anthropic_client: Any, research_task: Dict,
     Args:
         anthropic_client: Anthropic API client
         research_task: Dictionary containing research task details
-        source_summaries: List of source summary dictionaries
+        sources: List of Source objects
         batch_size: Maximum number of sources to process in a single batch
         verbose: Whether to print detailed information
         
@@ -68,14 +59,14 @@ def _batch_process_summaries(anthropic_client: Any, research_task: Dict,
         Combined research summary
     """
     # Sort sources by relevance
-    sorted_summaries = sorted(source_summaries, key=lambda s: s.get('relevance', 0), reverse=True)
+    sorted_sources = sorted(sources, key=lambda s: s.relevance_score, reverse=True)
     
     # Process in batches
     batch_summaries = []
-    for i in range(0, len(sorted_summaries), batch_size):
-        batch = sorted_summaries[i:i+batch_size]
+    for i in range(0, len(sorted_sources), batch_size):
+        batch = sorted_sources[i:i+batch_size]
         if verbose:
-            print(f"Processing batch {i//batch_size + 1} with sources {i+1}-{min(i+batch_size, len(sorted_summaries))}")
+            print(f"Processing batch {i//batch_size + 1} with sources {i+1}-{min(i+batch_size, len(sorted_sources))}")
         
         # Generate summary for this batch
         batch_summary = _generate_research_summary(
@@ -83,7 +74,7 @@ def _batch_process_summaries(anthropic_client: Any, research_task: Dict,
             research_task, 
             batch,
             is_batch=True,
-            batch_info=f"Batch {i//batch_size + 1}/{(len(sorted_summaries) + batch_size - 1)//batch_size}"
+            batch_info=f"Batch {i//batch_size + 1}/{(len(sorted_sources) + batch_size - 1)//batch_size}"
         )
         
         batch_summaries.append(batch_summary)
@@ -134,7 +125,7 @@ def _batch_process_summaries(anthropic_client: Any, research_task: Dict,
 
 
 def _generate_research_summary(anthropic_client: Any, research_task: Dict, 
-                             source_summaries: List[Dict], is_batch: bool = False, 
+                             sources: List[Source], is_batch: bool = False, 
                              batch_info: str = "") -> str:
     """
     Generate a research summary that includes executive summary, key findings,
@@ -143,7 +134,7 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
     Args:
         anthropic_client: Anthropic API client
         research_task: Dictionary containing research task details
-        source_summaries: List of source summary dictionaries
+        sources: List of Source objects
         is_batch: Whether this is processing a batch of a larger set
         batch_info: Information about the batch position
         
@@ -152,15 +143,21 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
     """
     batch_context = f"\nThis is {batch_info} of sources being processed." if is_batch else ""
     
-    # Include only essential source info for the main summary generation
+    # Include essential source info for the main summary generation
     source_ref_list = []
-    for src in source_summaries:
-        source_ref_list.append({
-            "index": src["index"],
-            "title": src["title"],
-            "url": src["url"],
-            "relevance": src["relevance"]
-        })
+    for i, src in enumerate(sources):
+        source_info = {
+            "index": i + 1,
+            "title": src.title,
+            "url": src.url,
+            "relevance": src.relevance_score
+        }
+        
+        # Include short summaries if available
+        if src.short_summary:
+            source_info["key_points"] = src.short_summary
+            
+        source_ref_list.append(source_info)
     
     prompt = f"""
     You are a research assistant summarizing findings from web research.{batch_context}
@@ -206,11 +203,21 @@ def _generate_research_summary(anthropic_client: Any, research_task: Dict,
     
     # Now append the detailed source summaries
     source_detail_section = "\n\n## Detailed Source Summaries\n\n"
-    for src in source_summaries:
-        source_detail_section += f"### Source [{src['index']}]: {src['title']}\n"
-        source_detail_section += f"**URL:** {src['url']}\n"
-        source_detail_section += f"**Relevance Score:** {src['relevance']:.2f}\n\n"
-        source_detail_section += f"{src['summary']}\n\n"
+    for i, src in enumerate(sources):
+        source_detail_section += f"### Source [{i+1}]: {src.title}\n"
+        source_detail_section += f"**URL:** {src.url}\n"
+        source_detail_section += f"**Relevance Score:** {src.relevance_score:.2f}\n\n"
+        
+        # Use detailed summary if available, otherwise use the short summary
+        if src.detailed_summary:
+            source_detail_section += f"{src.detailed_summary}\n\n"
+        elif src.short_summary:
+            source_detail_section += f"**Key Points:**\n{src.short_summary}\n\n"
+            if src.research_topics:
+                source_detail_section += f"**Suggested Research Topics:**\n{src.research_topics}\n\n"
+        else:
+            source_detail_section += "*No detailed summary available.*\n\n"
+            
         source_detail_section += "---\n\n"
     
     # Combine the main summary with the source details
@@ -302,6 +309,9 @@ def _generate_source_summary(anthropic_client: Any, source: Source, research_tas
         Title: {source.title}
         URL: {source.url}
         
+        SHORT SUMMARY:
+        {source.short_summary if source.short_summary else "No short summary available."}
+        
         CHUNK SUMMARIES:
         {combined_summary}
         
@@ -340,6 +350,9 @@ def _generate_source_summary(anthropic_client: Any, source: Source, research_tas
         SOURCE:
         Title: {source.title}
         URL: {source.url}
+        
+        SHORT SUMMARY:
+        {source.short_summary if source.short_summary else "No short summary available."}
         
         DOCUMENT CONTENT:
         {source.content}
