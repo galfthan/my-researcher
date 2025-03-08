@@ -139,7 +139,7 @@ class WebResearchTool:
             print(f"Found {len(search_results)} results")
             
             # Process each search result
-            for result in search_results[:5]:  # Limit to top 5 results per query
+            for result in search_results[:8]:  # Limit to top 8 results per query
                 url = result.get('link')
                 
                 # Skip if we already have this source

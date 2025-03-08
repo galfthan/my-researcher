@@ -87,19 +87,20 @@ def prepare_for_claude(research_task: Dict, sources: List[Source], summary: str,
     # Add information about source files with full URLs
     output.append("\n## Source Files and URLs")
     output.append(f"Source content has been saved to: {output_dir}\n")
-    output.append("Full source URLs for easy reference:")
     
-    # List all sources with their full URLs
-    for i, source in enumerate(sources):
-        output.append(f"{i+1}. [{source.title}]({source.url})")
-        output.append(f"   - Relevance score: {source.relevance_score:.2f}")
+    # List all sources with their full URLs for extended summary reports (short ones already has this info in summary)
+    if any(s.detailed_summary for s in sources):
+        output.append("Full source URLs for easy reference:")
+        for i, source in enumerate(sources):
+            output.append(f"{i+1}. [{source.title}]({source.url})")
+            output.append(f"   - Relevance score: {source.relevance_score:.2f}")
         
-        # Add short summary if available
-        if source.short_summary:
-            output.append(f"   - Key points: {source.short_summary.replace('•', '-').strip()}")
+            # Add short summary if available
+            if source.short_summary:
+                output.append(f"   - Key points: {source.short_summary.replace('•', '-').strip()}")
         
-        output.append(f"   - URL: {source.url}")
-        output.append("")
+            output.append(f"   - URL: {source.url}")
+            output.append("")
     
     # Add instructions for using with Claude
     output.append("\n## Using These Results with Claude")
@@ -110,7 +111,7 @@ def prepare_for_claude(research_task: Dict, sources: List[Source], summary: str,
         output.append("\n## Generating Detailed Summaries")
         output.append("This research was conducted in quick mode. To generate detailed summaries, run again with:")
         output.append("```")
-        output.append("python -m web_research_tool.main --input your_request.yaml --output research_output")
+        output.append("python -m web_research_tool.main --input your_request.yaml --detailed-summaries --output research_output")
         output.append("```")
         output.append("Or add `detailed_summaries: true` to your YAML request.")
     

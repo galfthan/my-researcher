@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--config", "-c", type=str, help="Path to config.json file with API keys")
     parser.add_argument("--delay", "-d", type=float, default=1.0, help="Delay between API requests (in seconds)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
-    parser.add_argument("--quick", "-Q", action="store_true", help="Quick mode - skip detailed summaries")
+    parser.add_argument("--detailed-summaries", "-D", action="store_true", help="Do detailed summaries")
     
     args = parser.parse_args()
     
@@ -67,7 +67,7 @@ def main():
         request_data = yaml.safe_load(yaml_request)
         
         # Check if detailed_summaries is specified in the YAML
-        generate_detailed_summaries = not args.quick
+        generate_detailed_summaries = args.detailed_summaries
         if "detailed_summaries" in request_data:
             generate_detailed_summaries = request_data["detailed_summaries"]
             # Remove from request to avoid confusion in processing
