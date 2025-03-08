@@ -45,6 +45,15 @@ def save_source_content(sources: List[Source], output_dir: str) -> List[str]:
             f.write(f"SOURCE: {source.title}\n")
             f.write(f"URL: {source.url}\n")
             f.write(f"RELEVANCE: {source.relevance_score}\n")
+            
+            # Add short summary if available
+            if source.short_summary:
+                f.write(f"\nKEY POINTS:\n{source.short_summary}\n")
+            
+            # Add research topics if available
+            if source.research_topics:
+                f.write(f"\nSUGGESTED RESEARCH TOPICS:\n{source.research_topics}\n")
+            
             f.write("\n" + "="*80 + "\n\n")
             f.write(source.content)
         
@@ -61,34 +70,3 @@ def prepare_for_claude(research_task: Dict, sources: List[Source], summary: str,
         sources: List of sources
         summary: Research summary
         output_dir: Directory where source files are saved
-        
-    Returns:
-        Text output for Claude Web
-    """
-    output = []
-    
-    # Add header
-    output.append(f"# Research Results: {research_task.get('topic', 'Research Topic')}")
-    output.append(f"*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
-    
-    # Add summary
-    output.append(summary)
-    output.append("\n" + "="*80 + "\n")
-    
-    # Add information about source files with full URLs
-    output.append("\n## Source Files and URLs")
-    output.append(f"Source content has been saved to: {output_dir}\n")
-    output.append("Full source URLs for easy reference:")
-    
-    # List all sources with their full URLs
-    for i, source in enumerate(sources):
-        output.append(f"{i+1}. [{source.title}]({source.url})")
-        output.append(f"   - Relevance score: {source.relevance_score:.2f}")
-        output.append(f"   - URL: {source.url}")
-        output.append("")
-    
-    # Add instructions for using with Claude
-    output.append("\n## Using These Results with Claude")
-    output.append("Copy this summary and upload the source files to continue your research conversation with Claude.")
-    
-    return "\n".join(output)
