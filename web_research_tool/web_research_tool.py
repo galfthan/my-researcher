@@ -15,7 +15,7 @@ from .models import SearchQuery, Source
 from .search import google_search
 from .content_extraction import extract_content
 from .source_evaluation import evaluate_source_relevance
-from .query_generation import generate_initial_queries, generate_follow_up_queries
+from .query_generation import generate_initial_queries, generate_follow_up_queries, extract_topics_from_sources
 from .summarization import summarize_findings
 from .output import save_source_content, prepare_for_claude
 
@@ -197,17 +197,29 @@ class WebResearchTool:
             
             # Generate follow-up queries if needed
             if len(self.sources) < self.max_sources and search_iteration < self.max_searches - 1:
+                # Get list of previously executed queries
                 previous_queries = [q.query for q in 
                                    [sq for sq_key, sq in 
                                     [(f"{q.query}:{q.site_restrict}", q) for q in self.search_queries] 
                                     if sq_key in self.completed_queries]]
                 
+                # Get follow-up queries based on sources including their short summaries and research topics
                 follow_up_queries = generate_follow_up_queries(
                     self.anthropic_client,
                     research_task, 
                     self.sources,
                     previous_queries
                 )
+                
+                # Extract unique research topics from sources for logging
+                if self.verbose:
+                    unique_topics = extract_topics_from_sources(self.sources)
+                    if unique_topics:
+                        print("Unique research topics identified:")
+                        for i, topic in enumerate(unique_topics[:5]):  # Show top 5
+                            print(f"  {i+1}. {topic}")
+                        if len(unique_topics) > 5:
+                            print(f"  ... and {len(unique_topics) - 5} more")
                 
                 # Add new queries to our list
                 for query in follow_up_queries:
