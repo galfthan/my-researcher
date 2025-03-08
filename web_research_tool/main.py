@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--config", "-c", type=str, help="Path to config.json file with API keys")
     parser.add_argument("--delay", "-d", type=float, default=1.0, help="Delay between API requests (in seconds)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--detailed-summaries", "-D", action="store_true", help="Do detailed summaries")
     
     args = parser.parse_args()
     
@@ -61,6 +62,22 @@ def main():
                 pass
             yaml_request = "\n".join(yaml_lines)
     
+    # Handle YAML content
+    try:
+        request_data = yaml.safe_load(yaml_request)
+        
+        # Check if detailed_summaries is specified in the YAML
+        generate_detailed_summaries = args.detailed_summaries
+        if "detailed_summaries" in request_data:
+            generate_detailed_summaries = request_data["detailed_summaries"]
+            # Remove from request to avoid confusion in processing
+            del request_data["detailed_summaries"]
+            yaml_request = yaml.dump(request_data)
+            
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML: {e}")
+        return 1
+    
     # Create the research tool
     research_tool = WebResearchTool(
         google_api_key=config.get("google_api_key"),
@@ -69,11 +86,13 @@ def main():
         max_sources=args.max_sources,
         max_searches=args.max_searches,
         delay=args.delay,
-        verbose=args.verbose
+        verbose=args.verbose,
+        generate_detailed_summaries=generate_detailed_summaries
     )
     
     # Conduct the research
     try:
+        print(f"Running in {'quick' if not generate_detailed_summaries else 'detailed'} mode")
         output_text, file_paths = research_tool.conduct_research(yaml_request, args.output)
         print(f"Research completed successfully.")
         print(f"Summary saved to {args.output}/research_summary.md")

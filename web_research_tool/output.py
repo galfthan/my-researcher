@@ -45,6 +45,15 @@ def save_source_content(sources: List[Source], output_dir: str) -> List[str]:
             f.write(f"SOURCE: {source.title}\n")
             f.write(f"URL: {source.url}\n")
             f.write(f"RELEVANCE: {source.relevance_score}\n")
+            
+            # Add short summary if available
+            if source.short_summary:
+                f.write(f"\nKEY POINTS:\n{source.short_summary}\n")
+            
+            # Add research topics if available
+            if source.research_topics:
+                f.write(f"\nSUGGESTED RESEARCH TOPICS:\n{source.research_topics}\n")
+            
             f.write("\n" + "="*80 + "\n\n")
             f.write(source.content)
         
@@ -78,17 +87,32 @@ def prepare_for_claude(research_task: Dict, sources: List[Source], summary: str,
     # Add information about source files with full URLs
     output.append("\n## Source Files and URLs")
     output.append(f"Source content has been saved to: {output_dir}\n")
-    output.append("Full source URLs for easy reference:")
     
-    # List all sources with their full URLs
-    for i, source in enumerate(sources):
-        output.append(f"{i+1}. [{source.title}]({source.url})")
-        output.append(f"   - Relevance score: {source.relevance_score:.2f}")
-        output.append(f"   - URL: {source.url}")
-        output.append("")
+    # List all sources with their full URLs for extended summary reports (short ones already has this info in summary)
+    if any(s.detailed_summary for s in sources):
+        output.append("Full source URLs for easy reference:")
+        for i, source in enumerate(sources):
+            output.append(f"{i+1}. [{source.title}]({source.url})")
+            output.append(f"   - Relevance score: {source.relevance_score:.2f}")
+        
+            # Add short summary if available
+            if source.short_summary:
+                output.append(f"   - Key points: {source.short_summary.replace('•', '-').strip()}")
+        
+            output.append(f"   - URL: {source.url}")
+            output.append("")
     
     # Add instructions for using with Claude
     output.append("\n## Using These Results with Claude")
     output.append("Copy this summary and upload the source files to continue your research conversation with Claude.")
+    
+    # Add option to get detailed summaries if they weren't generated
+    if not any(s.detailed_summary for s in sources):
+        output.append("\n## Generating Detailed Summaries")
+        output.append("This research was conducted in quick mode. To generate detailed summaries, run again with:")
+        output.append("```")
+        output.append("python -m web_research_tool.main --input your_request.yaml --detailed-summaries --output research_output")
+        output.append("```")
+        output.append("Or add `detailed_summaries: true` to your YAML request.")
     
     return "\n".join(output)

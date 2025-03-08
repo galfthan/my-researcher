@@ -5,14 +5,15 @@ Functions for evaluating source relevance.
 import re
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import anthropic
 from .models import Source
 
 def evaluate_source_relevance(anthropic_client: Any, source: Source, research_task: Dict, 
-                             verbose: bool = False) -> float:
+                             verbose: bool = False) -> Tuple[float, str, str]:
     """
     Use Claude to evaluate the relevance of a source to the research task.
+    Also returns a short summary and potential research topics.
     Processes the entire document, chunking if necessary for large documents.
     
     Args:
@@ -22,7 +23,7 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
         verbose: Whether to print detailed information
         
     Returns:
-        Relevance score between 0.0 and 1.0
+        Tuple of (relevance_score, short_summary, research_topics)
     """
     # For very large documents, we need to process them in chunks
     # but still maintain a comprehensive analysis
@@ -47,11 +48,14 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
             
         # Analyze each chunk
         chunk_scores = []
+        chunk_summaries = []
+        chunk_topics = []
+        
         for i, chunk in enumerate(chunks):
             if verbose:
                 print(f"Analyzing chunk {i+1}/{len(chunks)}...")
             
-            score = _evaluate_content_chunk(
+            score, summary, topics = _evaluate_content_chunk(
                 anthropic_client, 
                 source, 
                 chunk, 
@@ -60,6 +64,8 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
                 chunk_info=f"Chunk {i+1} of {len(chunks)}"
             )
             chunk_scores.append(score)
+            chunk_summaries.append(summary)
+            chunk_topics.append(topics)
             
             # Add a small delay to avoid rate limiting
             time.sleep(0.5)
@@ -75,14 +81,23 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
         else:
             final_score = sum(chunk_scores) / len(chunk_scores)
             
+        # Combine summaries and topics from the most relevant chunks
+        zipped_chunks = list(zip(chunk_scores, chunk_summaries, chunk_topics))
+        zipped_chunks.sort(reverse=True, key=lambda x: x[0])  # Sort by relevance score
+        
+        # Take summaries and topics from the top 2 chunks or all if fewer
+        top_chunks = zipped_chunks[:min(2, len(zipped_chunks))]
+        final_summary = " ".join([f"- {chunk[1]}" for chunk in top_chunks])
+        final_topics = " ".join([chunk[2] for chunk in top_chunks])
+            
         if verbose:
             print(f"Final combined relevance score: {final_score:.2f}")
             
-        return final_score
+        return final_score, final_summary, final_topics
 
 def _evaluate_content_chunk(anthropic_client: Any, source: Source, content: str, 
                            research_task: Dict, is_chunk: bool = False,
-                           chunk_info: str = "") -> float:
+                           chunk_info: str = "") -> Tuple[float, str, str]:
     """
     Evaluate a specific chunk of content for relevance.
     
@@ -95,7 +110,7 @@ def _evaluate_content_chunk(anthropic_client: Any, source: Source, content: str,
         chunk_info: Information about the chunk position
         
     Returns:
-        Relevance score between 0.0 and 1.0
+        Tuple of (relevance_score, short_summary, research_topics)
     """
     chunk_context = f"\nThis is {chunk_info} from the full document." if is_chunk else ""
     
@@ -120,22 +135,39 @@ def _evaluate_content_chunk(anthropic_client: Any, source: Source, content: str,
     DOCUMENT CONTENT:
     {truncated_content}
     
-    Evaluate how relevant this source is to the research task on a scale from 0.0 to 1.0:
+    I need three pieces of information:
+    
+    1. RELEVANCE SCORE: Evaluate how relevant this source is to the research task on a scale from 0.0 to 1.0:
     - 0.0: Completely irrelevant
     - 0.3: Tangentially related but not useful
     - 0.5: Somewhat relevant
     - 0.7: Relevant with good information
     - 0.9-1.0: Highly relevant, exactly what we need
     
-    RESPOND WITH ONLY A SINGLE NUMBER BETWEEN 0.0 AND 1.0, NO OTHER TEXT.
+    2. SUMMARY: Provide a very concise 3-bullet summary of the key points in this content relevant to the research task.
+    
+    3. RESEARCH TOPICS: Suggest 2-3 potential follow-up research topics or questions based on this content.
+    
+    FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
+    SCORE: [number between 0.0 and 1.0]
+    
+    SUMMARY:
+    • [First key point]
+    • [Second key point]
+    • [Third key point]
+    
+    TOPICS:
+    • [First research topic]
+    • [Second research topic]
+    • [Third research topic]
     """
     
     try:
         response = anthropic_client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=100,
+            max_tokens=500,
             temperature=0.0,
-            system="You evaluate source relevance with a single number between 0.0 and 1.0.",
+            system="You evaluate source relevance and provide concise summaries.",
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -143,16 +175,24 @@ def _evaluate_content_chunk(anthropic_client: Any, source: Source, content: str,
         
         result = response.content[0].text.strip()
         
-        # Extract just the number
-        score_match = re.search(r'(\d+\.\d+|\d+)', result)
+        # Extract the score
+        score_match = re.search(r'SCORE:\s*(\d+\.\d+|\d+)', result)
         if score_match:
             score = float(score_match.group(1))
             # Ensure the score is between 0 and 1
             score = max(0.0, min(score, 1.0))
-            return score
         else:
             print(f"Could not extract score from Claude's response: {result}")
-            return 0.5  # Default to neutral relevance
+            score = 0.5  # Default to neutral relevance
+        
+        # Extract the summary and topics
+        summary_match = re.search(r'SUMMARY:(.*?)TOPICS:', result, re.DOTALL)
+        topics_match = re.search(r'TOPICS:(.*)', result, re.DOTALL)
+        
+        summary = summary_match.group(1).strip() if summary_match else "No summary available."
+        topics = topics_match.group(1).strip() if topics_match else "No research topics suggested."
+        
+        return score, summary, topics
     except Exception as e:
         print(f"Error evaluating source relevance: {e}")
-        return 0.5  # Default to neutral relevance
+        return 0.5, "Error generating summary.", "Error generating research topics."

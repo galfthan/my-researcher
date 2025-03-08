@@ -3,6 +3,6 @@ Web Research Tool - A tool for conducting comprehensive web research using Googl
 """
 
 from .models import SearchQuery, Source
-from .web-_research_tool import WebResearchTool
+from .web_research_tool import WebResearchTool
 
 __all__ = ['WebResearchTool', 'SearchQuery', 'Source']
