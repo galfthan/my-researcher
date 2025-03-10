@@ -74,6 +74,7 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
                               previous_queries: List[str]) -> List[SearchQuery]:
     """
     Generate follow-up search queries based on sources found so far.
+    Enhanced to utilize short summaries and research topics.
     
     Args:
         anthropic_client: Anthropic API client
@@ -84,15 +85,41 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     Returns:
         List of new SearchQuery objects
     """
-    # Create a summary of sources found so far
+    # Create a more detailed summary of sources found so far
     sources_summary = []
+    collected_research_topics = []
+    knowledge_gaps = []
+    
     for s in sources:
-        sources_summary.append({
+        source_info = {
             "title": s.title,
             "url": s.url,
-            "snippet": s.snippet,
             "relevance": s.relevance_score
-        })
+        }
+        
+        # Include short summaries if available
+        if s.short_summary:
+            source_info["key_points"] = s.short_summary
+            
+        # Extract and collect research topics
+        if s.research_topics:
+            source_info["suggested_topics"] = s.research_topics
+            
+            # Clean up the research topics and add to our collection
+            topics = s.research_topics.replace('•', '').split('\n')
+            topics = [t.strip() for t in topics if t.strip()]
+            collected_research_topics.extend(topics)
+            
+        sources_summary.append(source_info)
+        
+    # Process collected research topics to identify potential knowledge gaps
+    # Only include topics that appear in highly relevant sources (relevance > 0.7)
+    high_relevance_topics = []
+    for s in sources:
+        if s.relevance_score > 0.7 and s.research_topics:
+            topics = s.research_topics.replace('•', '').split('\n')
+            topics = [t.strip() for t in topics if t.strip()]
+            high_relevance_topics.extend(topics)
     
     prompt = f"""
     You are a research assistant helping to generate effective follow-up search queries.
@@ -106,11 +133,16 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     SOURCES FOUND SO FAR:
     {json.dumps(sources_summary, indent=2)}
     
-    Based on the research task and sources found so far, generate 2-3 new search queries that would help find additional relevant information.
+    SUGGESTED RESEARCH TOPICS FROM SOURCES:
+    {json.dumps(high_relevance_topics, indent=2)}
+    
+    Based on the research task, sources found so far, and suggested research topics, generate 2-3 new search queries that would help find additional relevant information.
+    
     Focus on:
     1. Filling knowledge gaps in the current sources
-    2. Exploring aspects of the topic not yet covered
+    2. Exploring the suggested research topics from highly relevant sources
     3. Finding more specific or authoritative sources
+    4. Exploring aspects of the topic not yet covered
     
     For each query, assign an importance score from 1-5 (5 being highest priority).
     You may optionally specify site restrictions for any query (like site:example.com).
@@ -129,7 +161,7 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     """
     
     response = anthropic_client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-haiku-20241022",
         max_tokens=1000,
         temperature=0.3,
         system="You are a helpful research assistant that generates effective follow-up search queries.",
@@ -155,3 +187,30 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
         print(f"Error parsing Claude's follow-up query suggestions: {e}")
         print(f"Raw response: {result}")
         return []
+
+def extract_topics_from_sources(sources: List[Source]) -> List[str]:
+    """
+    Extract unique research topics from all sources.
+    
+    Args:
+        sources: List of Source objects
+        
+    Returns:
+        List of unique research topics
+    """
+    all_topics = []
+    for source in sources:
+        if source.research_topics:
+            # Split by bullet points and clean up
+            topics = source.research_topics.replace('•', '').split('\n')
+            topics = [t.strip() for t in topics if t.strip()]
+            all_topics.extend(topics)
+    
+    # Remove duplicates while preserving order
+    unique_topics = []
+    for topic in all_topics:
+        normalized_topic = ' '.join(topic.lower().split())
+        if not any(normalized_topic in ' '.join(t.lower().split()) for t in unique_topics):
+            unique_topics.append(topic)
+    
+    return unique_topics
