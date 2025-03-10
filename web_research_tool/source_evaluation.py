@@ -27,8 +27,16 @@ def evaluate_source_relevance(anthropic_client: Any, source: Source, research_ta
     """
     # For very large documents, we need to process them in chunks
     # but still maintain a comprehensive analysis
-    full_content = source.content
+    # For extremely long ones we just read first parts
+    # TODO: make this optional
+
+    if len(source.content) > 30000:
+        full_content = source.content[0:30000]
+    else:
+        full_content = source.content
     
+
+
     # If content is short enough, analyze it directly
     if len(full_content) < 12000:  # Claude Haiku has ~16K token limit
         return _evaluate_content_chunk(anthropic_client, source, full_content, research_task)
