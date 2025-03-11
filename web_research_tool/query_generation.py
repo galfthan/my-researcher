@@ -24,7 +24,7 @@ def generate_initial_queries(anthropic_client: Any, research_task: Dict) -> List
     RESEARCH TASK:
     {json.dumps(research_task, indent=2)}
     
-    Based on this research task, generate 3-5 specific search queries that would be most effective for finding relevant information.
+    Based on this research task, generate 2 specific search queries that would be most effective for finding relevant information.
     For each query, assign an importance score from 1-5 (5 being highest priority).
     You may optionally specify site restrictions for any query (like site:example.com).
     
@@ -36,6 +36,7 @@ def generate_initial_queries(anthropic_client: Any, research_task: Dict) -> List
       site_restrict: "optional_site_restriction"
     - query: "second search query"
       importance: 3
+      site_restrict: "optional_site_restriction"
     ```
     
     ONLY INCLUDE THE YAML IN YOUR RESPONSE, NO OTHER TEXT.
@@ -68,6 +69,18 @@ def generate_initial_queries(anthropic_client: Any, research_task: Dict) -> List
         print(f"Error parsing Claude's query suggestions: {e}")
         print(f"Raw response: {result}")
         return [SearchQuery(query=f"Research {research_task.get('topic', 'topic')}")]
+
+
+def append_to_debug_file(content: str, file_path: str = "debug_output.txt"):
+    """
+    Append a string to a debug output file.
+    
+    Args:
+        content: The string content to append.
+        file_path: The path to the debug output file.
+    """
+    with open(file_path, 'a') as file:
+        file.write(content + '\n')
 
 def generate_follow_up_queries(anthropic_client: Any, research_task: Dict, 
                               sources: List[Source], 
@@ -130,19 +143,18 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     PREVIOUS QUERIES:
     {json.dumps(previous_queries, indent=2)}
     
-    SOURCES FOUND SO FAR:
-    {json.dumps(sources_summary, indent=2)}
-    
+
     SUGGESTED RESEARCH TOPICS FROM SOURCES:
     {json.dumps(high_relevance_topics, indent=2)}
     
-    Based on the research task, sources found so far, and suggested research topics, generate 2-3 new search queries that would help find additional relevant information.
+    Based on the research task, sources found so far, and suggested research topics, generate 1 new search queries that would help find additional relevant information.
     
     Focus on:
     1. Filling knowledge gaps in the current sources
     2. Exploring the suggested research topics from highly relevant sources
     3. Finding more specific or authoritative sources
     4. Exploring aspects of the topic not yet covered
+    5. Do not repeat previous queries
     
     For each query, assign an importance score from 1-5 (5 being highest priority).
     You may optionally specify site restrictions for any query (like site:example.com).
@@ -153,13 +165,14 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     - query: "first search query"
       importance: 5
       site_restrict: "optional_site_restriction"
-    - query: "second search query"
-      importance: 3
     ```
     
     ONLY INCLUDE THE YAML IN YOUR RESPONSE, NO OTHER TEXT.
     """
-    
+    #append_to_debug_file("PROMPT -----------")    
+    #append_to_debug_file(prompt)
+
+
     response = anthropic_client.messages.create(
         model="claude-3-5-haiku-20241022",
         max_tokens=1000,
@@ -171,6 +184,10 @@ def generate_follow_up_queries(anthropic_client: Any, research_task: Dict,
     )
     
     result = response.content[0].text
+
+    #append_to_debug_file("RESULT -----------")    
+    #append_to_debug_file(result)
+
     
     # Extract YAML content
     if "```yaml" in result:

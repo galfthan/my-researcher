@@ -53,7 +53,8 @@ class WebResearchTool:
         
         self.sources = []
         self.search_queries = []
-        self.completed_queries = set()
+        self.completed_queries = set()  
+        self.executed_query_strings = []  # New list to track executed query strings    
         
         # Print configuration if verbose
         if self.verbose:
@@ -128,6 +129,8 @@ class WebResearchTool:
             if current_query.site_restrict:
                 print(f"Site restriction: {current_query.site_restrict}")
             
+            # Store the query string in our list of executed queries
+            self.executed_query_strings.append(current_query.query)  
             # Perform the search
             search_results = google_search(
                 self.google_service, 
@@ -139,7 +142,7 @@ class WebResearchTool:
             print(f"Found {len(search_results)} results")
             
             # Process each search result
-            for result in search_results[:8]:  # Limit to top 8 results per query
+            for result in search_results[:5]:  # Limit to top 5 results per query
                 url = result.get('link')
                 
                 # Skip if we already have this source
@@ -194,14 +197,11 @@ class WebResearchTool:
             
             # Mark this query as completed
             self.completed_queries.add(query_key)
-            
+                        
             # Generate follow-up queries if needed
             if len(self.sources) < self.max_sources and search_iteration < self.max_searches - 1:
-                # Get list of previously executed queries
-                previous_queries = [q.query for q in 
-                                   [sq for sq_key, sq in 
-                                    [(f"{q.query}:{q.site_restrict}", q) for q in self.search_queries] 
-                                    if sq_key in self.completed_queries]]
+                # Use our list of executed query strings directly
+                previous_queries = self.executed_query_strings
                 
                 # Get follow-up queries based on sources including their short summaries and research topics
                 follow_up_queries = generate_follow_up_queries(
@@ -209,7 +209,8 @@ class WebResearchTool:
                     research_task, 
                     self.sources,
                     previous_queries
-                )
+                )   
+           
                 
                 # Extract unique research topics from sources for logging
                 if self.verbose:
